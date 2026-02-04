@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: tcm-py
+Version: 0.0.1
+Summary: Thalamo-cortical model spectra fitting (Laplace transfer + Variational Laplace GC)
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Requires-Dist: scipy>=1.10
+
+# tcm-py
+
+Prototype port of tc_hilge2 + Laplace TF + Variational Laplace (GC).
