@@ -7,13 +7,30 @@ from tcm_py.dcm import build_dcm
 # --------------------------------
 # Observed spectrum
 # --------------------------------
-freqs = np.linspace(1.0, 80.0, 200)
+freqs = np.linspace(1.0, 80.0, 100)
 psd = 1.0 / (freqs ** 1.5)
 
 # --------------------------------
 # Build model
 # --------------------------------
 P0, M = build_dcm(ns=1, freqs=freqs, find_fp=True)
+
+
+from tcm_py.api import forward_spectrum
+
+# get your internal parameter vector m0 from wherever you pack it
+# easiest: grab it from inside fit_spectrum once you expose it, but for now:
+P = P0.copy()
+CSD0, _ = forward_spectrum(P, freqs, M)
+
+# poke a parameter that MUST matter
+P2 = P0.copy()
+P2["leak"] = P0.get("leak", -2.0) + 0.5
+CSD1, _ = forward_spectrum(P2, freqs, M)
+
+d = np.linalg.norm(np.real(CSD1).ravel() - np.real(CSD0).ravel())
+print("delta spectrum from leak poke:", d)
+
 
 # --------------------------------
 # Fit

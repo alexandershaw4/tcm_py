@@ -2,6 +2,54 @@ import numpy as np
 from scipy import linalg
 from ..utils.linalg import denan
 from .smooth import agauss_smooth
+import warnings
+
+def solve_stable(Jm, X0, rcond_thresh=1e-12, jitter0=1e-6, jitter_max=1e-1, use_lstsq_after=1e-3):
+    """
+    Robustly solve Jm * Ym = X0.
+
+    Strategy:
+      1) If well-conditioned -> direct solve.
+      2) Else -> add diagonal jitter progressively.
+      3) If still ill-conditioned beyond threshold -> fall back to lstsq (SVD-based).
+
+    Suppresses LinAlgWarning spam during the jitter path.
+    """
+    Jm = np.asarray(Jm)
+    X0 = np.asarray(X0)
+
+    # Try a cheap condition estimate; if it fails, treat as ill-conditioned.
+    try:
+        rcond = 1.0 / np.linalg.cond(Jm)
+    except Exception:
+        rcond = 0.0
+
+    # Fast path
+    if np.isfinite(rcond) and rcond >= rcond_thresh:
+        return linalg.solve(Jm, X0, assume_a="gen")
+
+    # Regularised path
+    I = np.eye(Jm.shape[0], dtype=Jm.dtype)
+    jitter = float(jitter0)
+
+    while jitter <= jitter_max:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", linalg.LinAlgWarning)
+            try:
+                # If jitter is getting big, stop doing solve() and go to lstsq
+                if jitter >= use_lstsq_after:
+                    break
+                return linalg.solve(Jm + jitter * I, X0, assume_a="gen")
+            except Exception:
+                pass
+        jitter *= 10.0
+
+    # Final fallback: least squares (SVD) is usually most stable here
+    # rcond=None uses default cutoff in SciPy; you can set rcond=1e-12 if you want.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", linalg.LinAlgWarning)
+        Ym, *_ = linalg.lstsq(Jm, X0)
+    return Ym
 
 def laplace_tf(P, M, U=None):
     """Port of Alex_LaplaceTFwDNew.m.
@@ -82,7 +130,7 @@ def laplace_tf(P, M, U=None):
 
         # observer weights: exp(P.J(win)) in MATLAB
         if 'J' in P:
-            Cw = np.exp(np.asarray(P['J']).reshape(-1, order='F')[win])
+            Cw = (np.asarray(P['J']).reshape(-1, order='F')[win])
         else:
             Cw = np.ones(n)
         X0 = x0[win]
@@ -108,7 +156,8 @@ def laplace_tf(P, M, U=None):
                 u_j = Uomega[j] * drive_scale
                 Ym = linalg.solve(Jm, BB_eff*u_j, assume_a='gen') + linalg.solve(Jm, X0, assume_a='gen')
             else:
-                Ym = linalg.solve(Jm, X0, assume_a='gen')
+                #Ym = linalg.solve(Jm, X0, assume_a='gen')
+                Ym = solve_stable(Jm, X0)
             MG[:, j] = Ym
             y[j] = np.dot(Cw.conj().T, Ym)
 
@@ -120,7 +169,7 @@ def laplace_tf(P, M, U=None):
         PHA.append(np.angle(MG) * 180/np.pi)
 
         Lgain = 1.0
-        if 'L' in P and len(np.atleast_1d(P['L'])) >= (ii+1):
+        if 'L' in P and len(np.atleast_1d(P['L'])) >= (ii):
             Lgain = float(np.exp(np.atleast_1d(P['L'])[ii]))
 
         Y = y.copy()

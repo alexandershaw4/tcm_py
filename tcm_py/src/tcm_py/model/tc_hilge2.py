@@ -88,6 +88,10 @@ def rates_from_T(T: np.ndarray, col: int, ns: int, npop: int) -> np.ndarray:
     #        return np.full((ns, npop), val)
     raise ValueError(f"Unsupported P.T shape {T.shape}")
 
+def logistic(z):
+    # clip to avoid exp overflow; 60 is plenty (exp(60) ~ 1e26)
+    z = np.clip(z, -60.0, 60.0)
+    return 1.0 / (1.0 + np.exp(-z))
 
 def vector_param(p: Any, ns: int, npop: int) -> np.ndarray:
     """Coerce parameter to per-population vector."""
@@ -111,7 +115,7 @@ def local_mag_block(v: np.ndarray, scale_nmda: float) -> np.ndarray:
     denom = 1.0 + 0.2 * np.exp(-0.062 * scale_nmda * v)
     return 1.0 / denom
 
-
+# the actuakl TCM equations of motion
 def tc_hilge2(
     x: np.ndarray,
     u: Any,
@@ -125,6 +129,8 @@ def tc_hilge2(
     # Allow P['p'] wrapping
     if isinstance(P, dict) and "p" in P and isinstance(P["p"], dict):
         P = P["p"]
+    
+    verbose=False
 
     # Optional M/H included in this file is set to 1 in the MATLAB code
     include_mh = True
@@ -260,22 +266,56 @@ def tc_hilge2(
     if CVp.size == 1:
         CVp = np.repeat(CVp, npop)
     CV = CVp * CV_base
-    GL = 1.0
+    #GL = 1.0
+    #GL = float(np.exp(np.asarray(P.get("leak", 0.0), dtype=float)))
+    leak = float(np.asarray(P.get("leak", 0.0), dtype=float))
+    GL = float(np.exp(np.clip(leak, -5.0, 5.0)))
 
     # Mean-field excitability shifts & firing
-    VR = VR0 + np.exp(np.asarray(P.get("S", 0.0), dtype=float))
+    #VR = VR0 + np.exp(np.asarray(P.get("S", 0.0), dtype=float))
+    #S = float(np.asarray(P.get("S", 0.0), dtype=float))
+    #VR = VR0 + np.exp(np.clip(S, -5.0, 5.0))
+
+    S_raw = np.asarray(P.get("S", 0.0), dtype=float)
+
+    # S can be scalar, (npop,), (ns, npop), etc.
+    if S_raw.ndim == 0:
+        S_eff = S_raw  # scalar
+    elif S_raw.size == 1:
+        S_eff = float(S_raw.reshape(-1)[0])
+    else:
+        # Try to interpret as per-population vector
+        S_eff = S_raw.reshape(-1)
+
+    # Build VR with broadcasting
+    if np.ndim(S_eff) == 0:
+        VR = VR0 + np.exp(np.clip(S_eff, -5.0, 5.0))
+    else:
+        # per-population; make shape (1, npop) then broadcast with V (ns, npop)
+        S_eff = np.clip(S_eff, -5.0, 5.0)
+        VR = VR0 + np.exp(S_eff)[None, :]
+
     R = 2.0 / 3.0
     V = X[:, :, 0]
-    FF = 1.0 / (1.0 + np.exp(-R * (V - VR)))
+    V = np.clip(V, -120.0, 60.0)
+    #FF = 1.0 / (1.0 + np.exp(-R * (V - VR)))
+    #FF = logistic(R * (V - VR))
     RS = 30.0
     #FF = np.where(V >= VR, 1.0, FF)
     #FF = np.where(V >= RS, 0.0, FF)
-    FF = np.where(V >= VR, 1.0, FF)
-    FF = np.where(V >= RS, 0.0, FF)
+    #FF = np.where(V >= VR, 1.0, FF)
+    #FF = np.where(V >= RS, 0.0, FF)
+    k_on  = 2.0/3.0        # your R
+    k_off = 1.0            # tune; higher = sharper cutoff
+    FF_on  = logistic(k_on  * (V - VR))
+    FF_off = logistic(k_off * (V - RS))   # 0 below RS, ->1 above RS
+    FF = FF_on * (1.0 - FF_off)
+
     m = FF
 
     if include_mh:
-        h = 1.0 - 1.0 / (1.0 + np.exp(-(2.0 / 3.0) * (V - VH)))
+        #h = 1.0 - 1.0 / (1.0 + np.exp(-(2.0 / 3.0) * (V - VH)))
+        h  = 1.0 - logistic((2.0 / 3.0) * (V - VH))
 
     # Extrinsic effects per source
     a = np.zeros((ns, 5), dtype=float)
@@ -357,6 +397,7 @@ def tc_hilge2(
 
         # --- Voltage equation
         Vi = X[i, :, 0]
+        Vi = np.clip(Vi, -120.0, 60.0)
         gE = X[i, :, 1]
         gI = X[i, :, 2]
         gN = X[i, :, 3]
@@ -395,6 +436,14 @@ def tc_hilge2(
         if include_mh and nk >= 7:
             F[i, :, 5] = (Im - gM) * KM[i, :]
             F[i, :, 6] = (Ih - gH) * KH[i, :]
+        
+        if verbose:
+            rV = np.linalg.norm(F[:, :, 0])
+            rE = np.linalg.norm(F[:, :, 1])
+            rI = np.linalg.norm(F[:, :, 2])
+            rN = np.linalg.norm(F[:, :, 3])
+            rB = np.linalg.norm(F[:, :, 4])
+            print("res blocks | V,E,I,N,B:", rV, rE, rI, rN, rB)
 
     f_vec = spm_vec(F)
 
