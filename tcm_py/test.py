@@ -7,8 +7,11 @@ from tcm_py.dcm import build_dcm
 # --------------------------------
 # Observed spectrum
 # --------------------------------
-freqs = np.linspace(1.0, 80.0, 100)
-psd = 1.0 / (freqs ** 1.5)
+#freqs = np.linspace(1.0, 80.0, 100)
+#psd = 1.0 / (freqs ** 1.5)
+
+freqs = np.linspace(1,80,100)
+psd = 1/(freqs ** 1.5) + np.exp( -(10 - freqs) **2 / 2*4 **2) + np.exp( -(50 - freqs) **2 / 2*10 **2)
 
 # --------------------------------
 # Build model
