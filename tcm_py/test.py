@@ -11,7 +11,10 @@ from tcm_py.dcm import build_dcm
 #psd = 1.0 / (freqs ** 1.5)
 
 freqs = np.linspace(1,80,100)
-psd = 1/(freqs ** 1.5) + np.exp( -(10 - freqs) **2 / 2*4 **2) + np.exp( -(50 - freqs) **2 / 2*10 **2)
+psd = 1/(freqs ** 1.5) + 2*np.exp( -(10 - freqs) **2 / (2*(2*4)**2)) + np.exp( -(50 - freqs) **2 / (2*(2*4)**2))
+plt.figure()
+plt.plot(freqs, psd, label="Observed")
+plt.show()
 
 # --------------------------------
 # Build model
