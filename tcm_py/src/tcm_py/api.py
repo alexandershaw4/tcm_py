@@ -357,7 +357,10 @@ def fit_spectrum(freqs, Syy, P0, priors, M, opts=None):
     if "TC" in pC_like:
         pC_like["TC"] = 1.0
     if "L" in pC_like:
-        pC_like["L"] = 0.125
+        pC_like["L"] = 1.0
+    
+    if "d" in pC_like:
+        pC_like["d"] = [1,1,1]
 
     # ---- flatten pC_like aligned with packing order
     pC_flat = vector_from_P_using_meta(pC_like, meta)
